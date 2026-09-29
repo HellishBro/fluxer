@@ -34,6 +34,7 @@ import {
 } from '@phosphor-icons/react';
 import {clsx} from 'clsx';
 import React, {useEffect, useRef} from 'react';
+import { Checkbox } from '@app/features/ui/checkbox/Checkbox';
 
 const NOTE_DESCRIPTOR = msg({
 	message: 'Note',
@@ -106,7 +107,7 @@ export function ListRenderer({node, id, renderChildren, options}: RendererProps<
 				data-flx="messaging.markdown.renderers.common.block-elements.list-renderer.tag"
 				{...markdownBlockProps(isInlineContext ? undefined : MarkdownBlock.List)}
 			>
-				{node.items.map((item: ListItem, i: number) => (
+				{node.items.map((item: ListItem, i: number) => item.checked === undefined ? (
 					<li
 						key={`${id}-item-${i}`}
 						className={clsx(isInlineContext && markupStyles.inlineFormat)}
@@ -114,6 +115,15 @@ export function ListRenderer({node, id, renderChildren, options}: RendererProps<
 					>
 						{renderChildren(item.children)}
 					</li>
+				) : (
+					<Checkbox
+						key={`${id}-item-${i}`}
+						className={clsx(isInlineContext && markupStyles.inlineFormat)}
+						checked={item.checked}
+						data-flx="messaging.markdown.renders.common.block-elements.list-renderer.li.checkmark"
+					>
+						{renderChildren(item.children)}
+					</Checkbox>
 				))}
 			</Tag>
 		);
