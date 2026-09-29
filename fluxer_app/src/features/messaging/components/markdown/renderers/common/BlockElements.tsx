@@ -107,23 +107,24 @@ export function ListRenderer({node, id, renderChildren, options}: RendererProps<
 				data-flx="messaging.markdown.renderers.common.block-elements.list-renderer.tag"
 				{...markdownBlockProps(isInlineContext ? undefined : MarkdownBlock.List)}
 			>
-				{node.items.map((item: ListItem, i: number) => item.checked === undefined ? (
+				{node.items.map((item: ListItem, i: number) => (
 					<li
 						key={`${id}-item-${i}`}
 						className={clsx(isInlineContext && markupStyles.inlineFormat)}
 						data-flx="messaging.markdown.renderers.common.block-elements.list-renderer.li"
 					>
+						{item.checked !== undefined && (
+							<Checkbox
+								checked={item.checked}
+								data-flx="messaging.markdown.renders.common.block-elements.list-renderer.li.checkmark"
+								readOnly={true}
+								size="small"
+								aria-hidden={true}
+								inline={true}
+							></Checkbox>
+						)}
 						{renderChildren(item.children)}
 					</li>
-				) : (
-					<Checkbox
-						key={`${id}-item-${i}`}
-						className={clsx(isInlineContext && markupStyles.inlineFormat)}
-						checked={item.checked}
-						data-flx="messaging.markdown.renders.common.block-elements.list-renderer.li.checkmark"
-					>
-						{renderChildren(item.children)}
-					</Checkbox>
 				))}
 			</Tag>
 		);
@@ -148,6 +149,16 @@ export function ListRenderer({node, id, renderChildren, options}: RendererProps<
 					className={clsx(isInlineContext && markupStyles.inlineFormat)}
 					data-flx="messaging.markdown.renderers.common.block-elements.list-renderer.li--2"
 				>
+					{item.checked !== undefined && (
+						<Checkbox
+							checked={item.checked}
+							data-flx="messaging.markdown.renders.common.block-elements.list-renderer.li.checkmark"
+							readOnly={true}
+							size="small"
+							aria-hidden={true}
+							inline={true}
+						></Checkbox>
+					)}
 					{renderChildren(item.children)}
 				</li>
 			))}
