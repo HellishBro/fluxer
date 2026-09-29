@@ -39,6 +39,7 @@ interface CheckboxBaseProps {
 	className?: string;
 	noFocus?: boolean;
 	size?: number | 'small';
+	inline?: boolean;
 	variant?: 'default' | 'menu';
 	linkShortcuts?: ReadonlyArray<CheckboxLinkShortcut>;
 	onChange?: (checked: boolean) => void;
@@ -73,6 +74,7 @@ export const Checkbox: React.FC<CheckboxProps> = observer(
 		children,
 		noFocus = false,
 		size = 24,
+		inline = false,
 		variant = 'default',
 		onChange,
 		onFocus,
@@ -173,7 +175,7 @@ export const Checkbox: React.FC<CheckboxProps> = observer(
 			return (
 				<span
 					className={clsx(
-						styles.checkboxWrapper,
+						inline ? styles.checkboxWrapperInline : styles.checkboxWrapper,
 						disabled && (variant === 'menu' ? styles.menuDisabled : styles.disabled),
 						className,
 					)}
