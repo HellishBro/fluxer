@@ -120,7 +120,7 @@ export function ListRenderer({node, id, renderChildren, options}: RendererProps<
 								readOnly={true}
 								size="small"
 								aria-hidden={true}
-								inline={true}
+								taskList={true}
 							></Checkbox>
 						)}
 						{renderChildren(item.children)}
@@ -156,7 +156,7 @@ export function ListRenderer({node, id, renderChildren, options}: RendererProps<
 							readOnly={true}
 							size="small"
 							aria-hidden={true}
-							inline={true}
+							taskList={true}
 						></Checkbox>
 					)}
 					{renderChildren(item.children)}

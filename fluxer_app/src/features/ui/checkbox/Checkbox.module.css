@@ -11,9 +11,11 @@
 	cursor: pointer;
 }
 
-.checkboxWrapperInline {
+.taskListCheck {
 	display: inline-block;
 	margin: 0 0.25rem;
+	position: relative;
+	top: 0.15rem;
 }
 
 .disabled {
