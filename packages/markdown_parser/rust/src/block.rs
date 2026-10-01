@@ -983,20 +983,20 @@ fn try_parse_nested_list(
 }
 
 fn match_checkbox(line: &str, flags: u32) -> (&str, Option<bool>) {
-    if ParserFlags::has(flags, ParserFlags::ALLOW_CHECKBOX) &&
-        line.len() > 4 &&
-        byte_at(line, 0) == b'[' &&
-        byte_at(line, 2) == b']' &&
-        byte_at(line, 3) == b' '
-    {
-        match byte_at(line, 1) {
-            b'x' => (&line[4..], Some(true)),
-            b' ' => (&line[4..], Some(false)),
+    if ParserFlags::has(flags, ParserFlags::ALLOW_CHECKBOX) {
+			let mut pos = 0;
+			while pos < line.len() && byte_at(line, pos) == b' ' {
+				pos += 1;
+			}
+			if pos < line.len() && byte_at(line, pos) == b'[' && byte_at(line, pos + 2) == b']' && byte_at(line, pos + 3) == b' ' {
+				return match byte_at(line, pos + 1) {
+            b'x' | b'X' => (&line[pos + 4..], Some(true)),
+            b' ' => (&line[pos + 4..], Some(false)),
             _ => (line, None)
         }
-    } else {
-        (line, None)
-    }
+			}
+		}
+    (line, None)
 }
 
 pub(crate) fn match_list_item(line: &str, flags: u32) -> Option<ListMatch<'_>> {
