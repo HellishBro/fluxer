@@ -22,7 +22,11 @@ import NativePermission from '@app/features/permissions/system/state/NativePermi
 import {resolvePriceAnnouncementCampaign} from '@app/features/premium/config/PriceAnnouncementCampaign';
 import PremiumState from '@app/features/premium/state/PremiumState';
 import {getPremiumGraceEndDate} from '@app/features/premium/utils/PremiumGrace';
-import {canServiceStripeSubscriptions, shouldShowPremiumFeatures} from '@app/features/premium/utils/PremiumUtils';
+import {
+	canServiceStripeSubscriptions,
+	getStoreOwnedSubscription,
+	shouldShowPremiumFeatures,
+} from '@app/features/premium/utils/PremiumUtils';
 import StreamerMode from '@app/features/streamer_mode/state/StreamerMode';
 import Nagbar from '@app/features/ui/state/Nagbar';
 import {hasUnavailableElectronNativeContext, isDesktop} from '@app/features/ui/utils/NativeUtils';
@@ -168,6 +172,7 @@ export const useNagbarConditions = (): NagbarConditions => {
 		if (isSelfHosted) return false;
 		if (!hasPurchaseReadyAccount) return false;
 		if (!premiumState || !priceAnnouncementCampaign) return false;
+		if (getStoreOwnedSubscription(premiumState)) return false;
 		const listPriceSwitch = premiumState.billing.list_price_switch ?? null;
 		if (!listPriceSwitch?.available || listPriceSwitch.pending) return false;
 		if (listPriceSwitch.currency !== priceAnnouncementCampaign.currency) return false;
@@ -302,6 +307,11 @@ export const useNagbarConditions = (): NagbarConditions => {
 			: nagbarState.forceEmailVerification
 				? true
 				: Boolean(RuntimeConfig.emailsEnabled && user?.isClaimed() && !user.verified),
+		canShowAccountLimited: nagbarState.forceHideAccountLimited
+			? false
+			: nagbarState.forceAccountLimited
+				? true
+				: user?.accountLimited === true,
 		canShowDesktopNotification: nagbarState.forceHideDesktopNotification
 			? false
 			: nagbarState.forceDesktopNotification
@@ -368,6 +378,12 @@ export const useActiveNagbars = (conditions: NagbarConditions): Array<NagbarStat
 				type: NagbarType.EMAIL_VERIFICATION,
 				priority: -3,
 				visible: conditions.userNeedsVerification,
+				dismissible: false,
+			},
+			{
+				type: NagbarType.ACCOUNT_LIMITED,
+				priority: -3.75,
+				visible: conditions.canShowAccountLimited,
 				dismissible: false,
 			},
 			{
