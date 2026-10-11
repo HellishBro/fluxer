@@ -148,7 +148,6 @@ const fluxerNativePackages = [
 	'@fluxer/windows-input-hook',
 	'@fluxer/linux-audio-capture',
 	'@fluxer/linux-portals',
-	'@fluxer/linux-screen-capture',
 	'@fluxer/linux-notifications',
 	'@fluxer/linux-evdev',
 	'@fluxer/linux-input-hook',
@@ -186,7 +185,6 @@ const fluxerNativePackagesByPlatform = {
 	linux: [
 		'@fluxer/linux-audio-capture',
 		'@fluxer/linux-portals',
-		'@fluxer/linux-screen-capture',
 		'@fluxer/linux-notifications',
 		'@fluxer/linux-evdev',
 		'@fluxer/linux-input-hook',
@@ -254,12 +252,6 @@ const nativeRuntimeFilePatterns = [
 	'node_modules/@fluxer/linux-portals/index.js',
 	'node_modules/@fluxer/linux-portals/loader-diagnostics.cjs',
 	'node_modules/@fluxer/linux-portals/*.node',
-	'node_modules/@fluxer/linux-screen-capture/package.json',
-	'node_modules/@fluxer/linux-screen-capture/index.js',
-	'node_modules/@fluxer/linux-screen-capture/loader-diagnostics.cjs',
-	'node_modules/@fluxer/linux-screen-capture/*.node',
-	'node_modules/@fluxer/linux-screen-capture/THIRD_PARTY_OBS_VKCAPTURE.md',
-	'node_modules/@fluxer/linux-screen-capture/obs-vkcapture/**/*',
 	'node_modules/@fluxer/linux-notifications/package.json',
 	'node_modules/@fluxer/linux-notifications/index.js',
 	'node_modules/@fluxer/linux-notifications/loader-diagnostics.cjs',
@@ -322,9 +314,6 @@ const nativeRuntimeFilePatterns = [
 	'node_modules/.pnpm/@fluxer+windows-input-hook@*/node_modules/@fluxer/windows-input-hook/*.node',
 	'node_modules/.pnpm/@fluxer+linux-audio-capture@*/node_modules/@fluxer/linux-audio-capture/*.node',
 	'node_modules/.pnpm/@fluxer+linux-portals@*/node_modules/@fluxer/linux-portals/*.node',
-	'node_modules/.pnpm/@fluxer+linux-screen-capture@*/node_modules/@fluxer/linux-screen-capture/*.node',
-	'node_modules/.pnpm/@fluxer+linux-screen-capture@*/node_modules/@fluxer/linux-screen-capture/THIRD_PARTY_OBS_VKCAPTURE.md',
-	'node_modules/.pnpm/@fluxer+linux-screen-capture@*/node_modules/@fluxer/linux-screen-capture/obs-vkcapture/**/*',
 	'node_modules/.pnpm/@fluxer+linux-notifications@*/node_modules/@fluxer/linux-notifications/*.node',
 	'node_modules/.pnpm/@fluxer+linux-evdev@*/node_modules/@fluxer/linux-evdev/*.node',
 	'node_modules/.pnpm/@fluxer+linux-input-hook@*/node_modules/@fluxer/linux-input-hook/*.node',
@@ -598,10 +587,6 @@ function expectedNativeRuntimeArtifactsForArch(platform, arch) {
 		artifacts.push({
 			packageName: '@fluxer/linux-portals',
 			relativePath: `linux-portals.${tag}.node`,
-		});
-		artifacts.push({
-			packageName: '@fluxer/linux-screen-capture',
-			relativePath: `linux-screen-capture.${tag}.node`,
 		});
 		artifacts.push({
 			packageName: '@fluxer/linux-notifications',
@@ -1074,11 +1059,91 @@ async function verifyLinuxGlibcCompatibility(context) {
 	);
 }
 
+const NATIVE_MODULE_PREFLIGHT_MODULES = require('./src/main/NativeModulePreflightModules.json');
+
+function packagedResourcesDir(context) {
+	if (context.electronPlatformName === 'darwin' || context.electronPlatformName === 'mas') {
+		return path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources');
+	}
+	return path.join(context.appOutDir, 'resources');
+}
+
+async function readAsarFileList(asarPath) {
+	const handle = await fs.open(asarPath, 'r');
+	try {
+		const prefix = Buffer.alloc(16);
+		await handle.read(prefix, 0, 16, 0);
+		const header = Buffer.alloc(prefix.readUInt32LE(12));
+		await handle.read(header, 0, header.length, 16);
+		const files = new Set();
+		const walk = (node, prefixPath) => {
+			for (const [name, child] of Object.entries(node.files ?? {})) {
+				const childPath = prefixPath ? `${prefixPath}/${name}` : name;
+				if (child.files) walk(child, childPath);
+				else files.add(childPath);
+			}
+		};
+		walk(JSON.parse(header.toString('utf8')), '');
+		return files;
+	} finally {
+		await handle.close();
+	}
+}
+
+async function verifyPreflightModulesPackaged(context) {
+	const platform = context.electronPlatformName === 'mas' ? 'darwin' : context.electronPlatformName;
+	const asarPath = path.join(packagedResourcesDir(context), 'app.asar');
+	const files = await readAsarFileList(asarPath);
+	const missing = [];
+	for (const spec of NATIVE_MODULE_PREFLIGHT_MODULES) {
+		if (!spec.platforms.includes(platform)) continue;
+		const manifestPath = `node_modules/${spec.name}/package.json`;
+		if (!files.has(manifestPath)) {
+			missing.push(spec.name);
+			continue;
+		}
+		const manifest = JSON.parse((await readAsarEntry(asarPath, manifestPath)).toString('utf8'));
+		const entry = path.posix.normalize(`node_modules/${spec.name}/${manifest.main ?? 'index.js'}`);
+		if (!files.has(entry)) {
+			missing.push(`${spec.name} (${entry})`);
+		}
+	}
+	if (missing.length > 0) {
+		throw new Error(
+			[
+				`The packaged app for ${platform} is missing native module(s) that the startup preflight requires:`,
+				...missing.map((entry) => `  - ${entry}`),
+				'Package them or remove them from src/main/NativeModulePreflightModules.json.',
+			].join('\n'),
+		);
+	}
+}
+
+async function readAsarEntry(asarPath, entryPath) {
+	const handle = await fs.open(asarPath, 'r');
+	try {
+		const prefix = Buffer.alloc(16);
+		await handle.read(prefix, 0, 16, 0);
+		const headerSize = prefix.readUInt32LE(4);
+		const header = Buffer.alloc(prefix.readUInt32LE(12));
+		await handle.read(header, 0, header.length, 16);
+		let node = JSON.parse(header.toString('utf8'));
+		for (const part of entryPath.split('/')) node = node.files[part];
+		if (node.unpacked) return await fs.readFile(path.join(`${asarPath}.unpacked`, ...entryPath.split('/')));
+		const data = Buffer.alloc(node.size);
+		await handle.read(data, 0, node.size, 8 + headerSize + Number(node.offset));
+		return data;
+	} finally {
+		await handle.close();
+	}
+}
+
 async function afterPack(context) {
 	await copyMissingPackagedNativeArtifacts(context);
 	await cleanupNativeBuildIntermediates(context);
 	await addLinuxLegacyBinarySymlink(context);
 	await verifyPackagedNativeArtifacts(context);
+	await verifyPreflightModulesPackaged(context);
 	await verifyLinuxGlibcCompatibility(context);
 }
 
@@ -1605,8 +1670,6 @@ module.exports = {
 			'node_modules/@fluxer/win-shell/*.node',
 			'node_modules/@fluxer/linux-audio-capture/*.node',
 			'node_modules/@fluxer/linux-portals/*.node',
-			'node_modules/@fluxer/linux-screen-capture/*.node',
-			'node_modules/@fluxer/linux-screen-capture/obs-vkcapture/**/*',
 			'node_modules/@fluxer/linux-notifications/*.node',
 			'node_modules/@fluxer/linux-evdev/*.node',
 			'node_modules/@fluxer/system-hunspell/*.node',
@@ -1633,8 +1696,6 @@ module.exports = {
 			'node_modules/.pnpm/@fluxer+windows-input-hook@*/node_modules/@fluxer/windows-input-hook/*.node',
 			'node_modules/.pnpm/@fluxer+linux-audio-capture@*/node_modules/@fluxer/linux-audio-capture/*.node',
 			'node_modules/.pnpm/@fluxer+linux-portals@*/node_modules/@fluxer/linux-portals/*.node',
-			'node_modules/.pnpm/@fluxer+linux-screen-capture@*/node_modules/@fluxer/linux-screen-capture/*.node',
-			'node_modules/.pnpm/@fluxer+linux-screen-capture@*/node_modules/@fluxer/linux-screen-capture/obs-vkcapture/**/*',
 			'node_modules/.pnpm/@fluxer+linux-notifications@*/node_modules/@fluxer/linux-notifications/*.node',
 			'node_modules/.pnpm/@fluxer+linux-evdev@*/node_modules/@fluxer/linux-evdev/*.node',
 			'node_modules/.pnpm/@fluxer+linux-input-hook@*/node_modules/@fluxer/linux-input-hook/*.node',

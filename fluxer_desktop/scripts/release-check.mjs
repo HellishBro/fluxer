@@ -146,7 +146,10 @@ function stageApp(options, sandbox) {
 			.map((name) => path.join(staged, name))
 			.find((candidate) => {
 				const stats = fs.statSync(candidate);
-				return stats.isFile() && (stats.mode & 0o111) !== 0 && /^fluxer/iu.test(path.basename(candidate));
+				const name = path.basename(candidate);
+				if (!stats.isFile() || !/^fluxer/iu.test(name)) return false;
+				if (process.platform === 'win32') return /\.exe$/iu.test(name) && !/_ExecutionStub\.exe$/iu.test(name);
+				return (stats.mode & 0o111) !== 0;
 			});
 		if (executable == null) fail(`${options.app} holds no fluxer executable`);
 		return {executable, portableRoot: path.join(staged, 'data')};
@@ -265,10 +268,28 @@ async function startUpdateFromRenderer(debugPort, timeoutMs) {
 	fail('update: the shell never told the renderer that an update is available');
 }
 
-async function waitForRenderer({logPath, debugPort, version, timeoutMs, label}) {
+function startupFailure(logPath) {
+	try {
+		const lines = fs.readFileSync(logPath, 'utf8').split(/\r?\n/u);
+		const index = lines.findIndex((line) => /\[NativeModulePreflight\] Fatal/u.test(line));
+		return index < 0 ? null : lines.slice(index, index + 3).join(' ');
+	} catch {
+		return null;
+	}
+}
+
+async function waitForRenderer({logPath, debugPort, version, timeoutMs, label, child = null}) {
 	const deadline = Date.now() + timeoutMs;
 	let observed = {log: observeLog(logPath), page: null};
 	while (Date.now() < deadline) {
+		if (child != null && (child.exitCode != null || child.signalCode != null)) {
+			const failure = startupFailure(logPath);
+			fail(
+				`${label}: the shell exited with ${child.exitCode ?? child.signalCode} before the renderer reported${
+					failure == null ? '' : `, ${failure.trim()}`
+				}`,
+			);
+		}
 		observed = {log: observeLog(logPath), page: await servedVersionInPage(debugPort)};
 		if (
 			observed.page === version &&
@@ -282,11 +303,43 @@ async function waitForRenderer({logPath, debugPort, version, timeoutMs, label}) 
 	fail(
 		`${label}: expected renderer ${version}, the shell serves ${observed.log.served?.version ?? 'nothing'} from ${
 			observed.log.served?.source ?? 'nowhere'
-		}, the window loads ${observed.page ?? 'nothing'} and reports ${observed.log.reportedBuild ?? 'nothing'}`,
+		}, the window loads ${observed.page ?? 'nothing'} and reports ${observed.log.reportedBuild ?? 'nothing'}${
+			startupFailure(logPath) == null ? '' : `, ${startupFailure(logPath)}`
+		}`,
 	);
 }
 
-async function stop(child) {
+function killWindowsTree(child, executable) {
+	for (const args of [
+		['/PID', String(child.pid), '/T', '/F'],
+		['/IM', path.basename(executable), '/T', '/F'],
+	]) {
+		try {
+			execFileSync('taskkill', args, {stdio: 'ignore'});
+		} catch {}
+	}
+}
+
+async function removeSandbox(sandbox) {
+	for (let attempt = 0; attempt < 20; attempt++) {
+		try {
+			fs.rmSync(sandbox, {recursive: true, force: true});
+			return;
+		} catch (error) {
+			if (attempt === 19) {
+				process.stderr.write(`could not remove ${sandbox}: ${error.message}\n`);
+				return;
+			}
+			await sleep(500);
+		}
+	}
+}
+
+async function stop(child, executable) {
+	if (process.platform === 'win32') {
+		killWindowsTree(child, executable);
+		return;
+	}
 	if (child.exitCode != null || child.signalCode != null) return;
 	const exited = new Promise((resolve) => {
 		child.once('exit', resolve);
@@ -338,6 +391,7 @@ async function run() {
 			version: firstVersion,
 			timeoutMs: options.timeoutMs,
 			label: 'launch',
+			child: options.update ? null : child,
 		});
 		result.stages.push({stage: 'launch', ...first});
 		let final = first;
@@ -370,9 +424,9 @@ async function run() {
 		result.shellStillRunning = child.exitCode == null && child.signalCode == null;
 		result.ok = true;
 	} finally {
-		await stop(child);
+		await stop(child, executable);
 		if (!options.keep) {
-			fs.rmSync(sandbox, {recursive: true, force: true});
+			await removeSandbox(sandbox);
 		}
 	}
 	process.stdout.write(`${JSON.stringify(result, null, '\t')}\n`);
